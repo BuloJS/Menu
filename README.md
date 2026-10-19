@@ -6,7 +6,7 @@ Carte du monde des restaurants, bars et boîtes où je suis allé.
   OpenStreetMap) propose des lieux. La catégorie vient du tag OSM `amenity`
   (`restaurant`, `cafe`… → restaurant ; `bar`, `pub` → bar ; `nightclub` → boîte)
   et se corrige à la main dans la fiche.
-- **Carte** : [Leaflet](https://leafletjs.com) avec les tuiles OpenStreetMap.
+- **Carte** : [MapLibre GL](https://maplibre.org) en globe 3D (bouton pour passer à la carte plate), fond vectoriel sombre CARTO, données OpenStreetMap.
 - **Fiche** : catégorie, date de visite, note sur 5, commentaire.
 - **Accès** : protégé par la session ouverte sur Home (`assets/guard.js`).
 - **Données** : table `user_data` de Home, ligne `app = "menu"`, isolée par

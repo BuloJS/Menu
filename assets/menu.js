@@ -1,4 +1,4 @@
-// Carte des tables : recherche OpenStreetMap (Photon) + sauvegarde Supabase.
+// Carte des tables : globe 3D (MapLibre), recherche OpenStreetMap (Photon), sauvegarde Supabase.
 //
 // Les lieux sont enregistrés dans la table user_data de Home, avec
 // app = "menu" : aucune nouvelle table à créer, et la RLS existante les isole
@@ -26,36 +26,114 @@ let sel = null;
 const active = { restaurant: true, bar: true, boite: true };
 
 // ---------------------------------------------------------------- carte --
-const map = L.map("map", { worldCopyJump: true, minZoom: 2 }).setView([30, 10], 2);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-}).addTo(map);
-const layer = L.layerGroup().addTo(map);
+// MapLibre GL : globe 3D + fond vectoriel sombre CARTO (données OpenStreetMap).
+const STYLE_URL = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const map = new maplibregl.Map({
+  container: "map", style: STYLE_URL, center: [10, 30], zoom: 1.4, minZoom: 0.8, maxPitch: 60,
+  attributionControl: { compact: true },
+});
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+
+let ready = false, globe = true, spin = !reduced, lastTouch = 0;
+const colorOf = () => ["match", ["get", "cat"],
+  "restaurant", css("--resto"), "bar", css("--bar"), "boite", css("--boite"), "#8e8e93"];
+
+function setProjection(isGlobe) {
+  globe = isGlobe;
+  map.setProjection({ type: isGlobe ? "globe" : "mercator" });
+  $("#proj").textContent = isGlobe ? "Carte plate" : "Globe 3D";
+  $("#spin").hidden = !isGlobe;
+}
+
+map.on("style.load", () => {
+  map.setProjection({ type: "globe" });
+  try { map.setSky({ "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0] }); } catch {}
+});
+
+map.on("load", () => {
+  map.addSource("places", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  // halo lumineux, point, anneau de sélection, anneau qui pulse
+  map.addLayer({ id: "glow", type: "circle", source: "places", paint: {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 7, 10, 15, 16, 24],
+    "circle-color": colorOf(), "circle-opacity": 0.28, "circle-blur": 0.9 } });
+  map.addLayer({ id: "dots", type: "circle", source: "places", paint: {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 3.5, 10, 7, 16, 10],
+    "circle-color": colorOf(), "circle-stroke-color": "#0b0c0f", "circle-stroke-width": 1.5 } });
+  map.addLayer({ id: "sel", type: "circle", source: "places", filter: ["==", ["get", "sel"], 1], paint: {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 7, 10, 11, 16, 15],
+    "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#fff", "circle-stroke-width": 2.5 } });
+  map.addLayer({ id: "pulse", type: "circle", source: "places", filter: ["==", ["get", "sel"], 1], paint: {
+    "circle-radius": 10, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#fff", "circle-stroke-width": 2, "circle-stroke-opacity": 0 } });
+
+  const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12, className: "tip" });
+  map.on("mousemove", "dots", (e) => {
+    map.getCanvas().style.cursor = "pointer";
+    tip.setLngLat(e.features[0].geometry.coordinates).setText(e.features[0].properties.name).addTo(map);
+  });
+  map.on("mouseleave", "dots", () => { map.getCanvas().style.cursor = ""; tip.remove(); });
+  map.on("click", "dots", (e) => select(e.features[0].properties.id, false));
+  map.on("click", (e) => {
+    if (!map.queryRenderedFeatures(e.point, { layers: ["dots"] }).length) { sel = null; render(); }
+  });
+
+  ready = true;
+  render();
+  fitAll();
+});
 
 function drawMarkers() {
-  layer.clearLayers();
-  for (const p of places) {
-    if (!active[p.cat]) continue;
-    const isSel = p.id === sel;
-    L.circleMarker([p.lat, p.lon], {
-      radius: isSel ? 12 : 8,
-      color: isSel ? "#fff" : "#1c1d21",
-      weight: isSel ? 3 : 2,
-      fillColor: css("--" + (p.cat === "restaurant" ? "resto" : p.cat)),
-      fillOpacity: 1,
-    })
-      .bindTooltip(p.name, { direction: "top", offset: [0, -6] })
-      .on("click", () => select(p.id, false))
-      .addTo(layer);
-  }
+  if (!ready) return;
+  map.getSource("places").setData({
+    type: "FeatureCollection",
+    features: places.filter((p) => active[p.cat]).map((p) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [p.lon, p.lat] },
+      properties: { id: p.id, name: p.name, cat: p.cat, sel: p.id === sel ? 1 : 0 },
+    })),
+  });
 }
 
 function fitAll() {
-  if (!places.length) return;
-  if (places.length === 1) return map.setView([places[0].lat, places[0].lon], 13);
-  map.fitBounds(L.latLngBounds(places.map((p) => [p.lat, p.lon])), { padding: [40, 40], maxZoom: 13 });
+  if (!ready || !places.length) return;
+  if (places.length === 1) return map.jumpTo({ center: [places[0].lon, places[0].lat], zoom: 12 });
+  const b = new maplibregl.LngLatBounds();
+  places.forEach((p) => b.extend([p.lon, p.lat]));
+  map.fitBounds(b, { padding: 60, maxZoom: 12, duration: reduced ? 0 : 1800 });
 }
+
+function flyTo(p, zoom) {
+  lastTouch = performance.now();
+  if (reduced) return map.jumpTo({ center: [p.lon, p.lat], zoom });
+  map.flyTo({ center: [p.lon, p.lat], zoom, curve: 1.6, speed: 0.9, essential: true });
+}
+
+// Rotation lente du globe quand on ne touche à rien
+["mousedown", "touchstart", "wheel", "keydown"].forEach((ev) =>
+  map.getCanvas().addEventListener(ev, () => { lastTouch = performance.now(); }, { passive: true }));
+function frame(t) {
+  if (ready && globe && spin && !document.hidden && map.getZoom() < 3.2 && !map.isMoving() && t - lastTouch > 5000) {
+    const c = map.getCenter();
+    map.jumpTo({ center: [((c.lng - 0.08 + 540) % 360) - 180, c.lat] });
+  }
+  // anneau qui pulse autour du lieu sélectionné
+  if (ready && map.getLayer("pulse")) {
+    const k = reduced ? 0.4 : (t % 1600) / 1600;
+    map.setPaintProperty("pulse", "circle-radius", 10 + k * 18);
+    map.setPaintProperty("pulse", "circle-stroke-opacity", 0.8 * (1 - k));
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+$("#proj").onclick = () => setProjection(!globe);
+$("#spin").onclick = () => {
+  spin = !spin; lastTouch = 0;
+  $("#spin").setAttribute("aria-pressed", String(spin));
+  $("#spin").textContent = spin ? "Rotation : oui" : "Rotation : non";
+};
+$("#spin").textContent = spin ? "Rotation : oui" : "Rotation : non";
+$("#spin").setAttribute("aria-pressed", String(spin));
 
 // ------------------------------------------------------------ affichage --
 function renderLegend() {
@@ -169,7 +247,7 @@ function render() { renderLegend(); drawMarkers(); renderList(); renderSel(); }
 function select(id, fly) {
   sel = id;
   const p = places.find((x) => x.id === id);
-  if (p) { active[p.cat] = true; if (fly) map.flyTo([p.lat, p.lon], Math.max(map.getZoom(), 15)); }
+  if (p) { active[p.cat] = true; if (fly) flyTo(p, Math.max(map.getZoom(), 15)); }
   render();
 }
 
@@ -203,7 +281,7 @@ function clean(list) {
 
 async function init() {
   try { places = clean(JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]")); } catch { places = []; }
-  render(); fitAll();
+  render();
   try {
     const remote = await loadData(APP);
     if (remote && Array.isArray(remote.places)) {
@@ -240,7 +318,7 @@ function fromFeature(f) {
 async function search(text) {
   ctl?.abort(); ctl = new AbortController();
   const params = new URLSearchParams({ q: text, limit: "10" });
-  if (map.getZoom() >= 5) {
+  if (ready && map.getZoom() >= 5) {
     const c = map.getCenter();
     params.set("lat", c.lat.toFixed(3)); params.set("lon", c.lng.toFixed(3)); params.set("location_bias_scale", "0.4");
   }
@@ -288,12 +366,12 @@ function pick(r) {
   if (!p) {
     p = {
       id: r.id, name: r.name, city: r.city, country: r.country, lat: r.lat, lon: r.lon,
-      cat: r.cat || "restaurant", date: new Date().toISOString().slice(0, 10), rating: 0, note: "",
+      cat: r.cat || "restaurant", date: "", rating: 0, note: "",
     };
     places.push(p); persist();
   }
   select(p.id, false);
-  map.flyTo([p.lat, p.lon], 16);
+  flyTo(p, 16);
 }
 
 q.addEventListener("input", () => {

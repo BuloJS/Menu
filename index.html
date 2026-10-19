@@ -9,7 +9,7 @@
 <script>document.documentElement.style.visibility = "hidden";</script>
 <script type="module" src="assets/guard.js"></script>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
 <link rel="stylesheet" href="assets/menu.css">
 </head>
 <body>
@@ -18,7 +18,7 @@
   <div>
     <a class="back" href="/Home/">← Home</a>
     <h1>Menu</h1>
-    <p class="sub">Tapez un nom : le lieu se place sur la carte, classé restaurant, bar ou boîte.</p>
+    <p class="sub">Les restaurants, bars et boîtes où je suis vraiment allé. Tapez un nom pour l'ajouter à la carte.</p>
   </div>
   <div class="search">
     <input id="q" type="search" placeholder="Rechercher un lieu (ex. Chez Paul Lyon)" autocomplete="off"
@@ -30,6 +30,10 @@
 <main class="layout">
   <div class="mapbox">
     <div id="map" aria-label="Carte des lieux"></div>
+    <div class="tools">
+      <button class="chip" id="proj" type="button">Carte plate</button>
+      <button class="chip" id="spin" type="button" aria-pressed="true">Rotation : oui</button>
+    </div>
     <div class="legend" id="legend"></div>
   </div>
 
@@ -43,7 +47,7 @@
   </aside>
 </main>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
 <script type="module" src="assets/menu.js"></script>
 </body>
 </html>
