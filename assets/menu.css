@@ -1,0 +1,116 @@
+/* Même identité que Home : thème graphite unique (voir home/assets/app.css). */
+:root {
+  color-scheme: dark;
+  --bg: #1c1d21;
+  --bg-top: #2a2c33;
+  --surface: #2c2e34;
+  --surface-hover: #383a42;
+  --border: rgba(255, 255, 255, .10);
+  --border-hover: rgba(255, 255, 255, .22);
+  --text: #f5f5f7;
+  --muted: #aeb0b6;
+  --blue: #0a84ff;
+  --red: #ff453a;
+  --resto: #ff9f0a;
+  --bar: #30d5c8;
+  --boite: #ff5fb0;
+  --shadow: 0 10px 30px rgba(0, 0, 0, .35);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  padding: 24px max(16px, env(safe-area-inset-right, 0px)) 40px max(16px, env(safe-area-inset-left, 0px));
+  background: var(--bg);
+  background-image: radial-gradient(120% 70% at 50% 0%, var(--bg-top) 0%, var(--bg) 55%);
+  background-attachment: fixed;
+  color: var(--text);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", Roboto, ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.top, .layout { max-width: 1280px; margin: 0 auto; }
+.top {
+  display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: flex-end;
+  justify-content: space-between; margin-bottom: 16px;
+}
+h1 { margin: 2px 0 0; font-size: 28px; font-weight: 700; letter-spacing: -.01em; }
+.sub { margin: 4px 0 0; color: var(--muted); max-width: 46ch; }
+.back { color: var(--muted); font-size: 13px; text-decoration: none; }
+.back:hover { color: var(--text); }
+
+/* Recherche */
+.search { position: relative; flex: 1 1 320px; max-width: 540px; }
+.search input {
+  width: 100%; font: inherit; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+}
+.search input::placeholder { color: var(--muted); }
+:where(input, select, textarea, button, .row, .chip):focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.sug {
+  position: absolute; z-index: 1200; left: 0; right: 0; top: calc(100% + 6px);
+  margin: 0; padding: 4px; list-style: none; max-height: 340px; overflow: auto;
+  background: var(--surface); border: 1px solid var(--border-hover); border-radius: 10px; box-shadow: var(--shadow);
+}
+.sug li { display: flex; gap: 10px; align-items: center; padding: 9px 10px; border-radius: 7px; cursor: pointer; min-width: 0; }
+.sug li:hover, .sug li[aria-selected="true"] { background: var(--surface-hover); }
+.sug .txt { min-width: 0; }
+.sug .n { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sug .c { color: var(--muted); font-size: 13px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sug .none { color: var(--muted); cursor: default; }
+.sug .none:hover { background: none; }
+
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--muted); }
+.dot.restaurant { background: var(--resto); }
+.dot.bar { background: var(--bar); }
+.dot.boite { background: var(--boite); }
+
+/* Carte + colonne */
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+@media (max-width: 880px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.mapbox { position: relative; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: #0f1114; }
+#map { height: min(72vh, 680px); min-height: 360px; background: #0f1114; }
+/* Fond de carte sombre à partir des tuiles OpenStreetMap standard */
+.leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.88) saturate(.7); }
+.leaflet-container { font: inherit; }
+.leaflet-control-attribution { background: rgba(28, 29, 33, .8) !important; color: var(--muted) !important; }
+.leaflet-control-attribution a { color: var(--muted) !important; }
+.leaflet-tooltip { background: var(--surface); color: var(--text); border: 1px solid var(--border-hover); box-shadow: var(--shadow); }
+.leaflet-tooltip-top:before { border-top-color: var(--border-hover); }
+
+.legend { position: absolute; z-index: 500; left: 10px; bottom: 28px; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; font-family: inherit; font-size: 13px; font-weight: 500; color: var(--text);
+  background: rgba(44, 46, 52, .94); border: 1px solid var(--border-hover); border-radius: 99px; padding: 6px 12px; cursor: pointer;
+}
+.chip[aria-pressed="false"] { opacity: .45; }
+
+.side { display: grid; gap: 12px; min-width: 0; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; min-width: 0; }
+.stats { display: flex; gap: 22px; flex-wrap: wrap; margin-bottom: 10px; }
+.stats b { display: block; font-size: 22px; line-height: 1; font-variant-numeric: tabular-nums; }
+.stats span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.list { max-height: 340px; overflow: auto; display: grid; gap: 2px; }
+.row { display: flex; gap: 10px; align-items: center; padding: 8px 6px; border-radius: 8px; cursor: pointer; min-width: 0; }
+.row:hover, .row.sel { background: var(--surface-hover); }
+.row .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row small { color: var(--muted); margin-left: auto; padding-left: 8px; white-space: nowrap; }
+.hint { color: var(--muted); margin: 0; font-size: 14px; }
+
+/* Fiche */
+.panel h2 { margin: 0 0 2px; font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }
+.where { color: var(--muted); margin: 0 0 12px; }
+.form { display: grid; gap: 10px; }
+.form label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+select, input[type="date"], textarea {
+  font: inherit; font-size: 14px; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; width: 100%; text-transform: none; letter-spacing: 0;
+}
+textarea { resize: vertical; min-height: 64px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.btn { font: inherit; font-size: 14px; color: var(--text); background: var(--surface-hover); border: 1px solid var(--border-hover); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+.btn.danger { color: var(--red); }
+.status { margin: 0; color: var(--muted); font-size: 13px; }
+.status.err { color: var(--red); }
