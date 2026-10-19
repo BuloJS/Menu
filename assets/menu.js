@@ -53,10 +53,16 @@ map.on("style.load", () => {
 
 map.on("load", () => {
   map.addSource("places", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addSource("trips", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   // halo lumineux, point, anneau de sélection, anneau qui pulse
   map.addLayer({ id: "glow", type: "circle", source: "places", paint: {
     "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 7, 10, 15, 16, 24],
     "circle-color": colorOf(), "circle-opacity": 0.28, "circle-blur": 0.9 } });
+  map.addLayer({ id: "trip-glow", type: "line", source: "trips", layout: { "line-cap": "round", "line-join": "round" }, paint: {
+    "line-color": ["get", "c"], "line-width": 7, "line-opacity": 0.22, "line-blur": 5 } }, "glow");
+  map.addLayer({ id: "trip-line", type: "line", source: "trips", layout: { "line-cap": "round", "line-join": "round" }, paint: {
+    "line-color": ["get", "c"], "line-opacity": 0.95,
+    "line-width": ["interpolate", ["linear"], ["zoom"], 1, 1.4, 10, 2.6, 16, 4] } }, "glow");
   map.addLayer({ id: "dots", type: "circle", source: "places", paint: {
     "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 3.5, 10, 7, 16, 10],
     "circle-color": colorOf(), "circle-stroke-color": "#0b0c0f", "circle-stroke-width": 1.5 } });
@@ -82,8 +88,72 @@ map.on("load", () => {
   fitAll();
 });
 
+// ---- trips : des lieux visités à des jours consécutifs sont reliés dans l'ordre
+const DAY = 864e5;
+const TRIP_COLORS = ["#64d2ff", "#bf5af2", "#ffd60a", "#ff6b6b", "#32d74b", "#ff9f0a"];
+const dayNum = (s) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) / DAY : null;
+};
+const fmtDay = (s) => {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+};
+function computeTrips(list) {
+  const dated = list.map((p, i) => ({ p, i, d: dayNum(p.date) })).filter((x) => x.d !== null)
+    .sort((a, b) => a.d - b.d || a.i - b.i);
+  const groups = []; let cur = [];
+  for (const x of dated) {
+    if (cur.length && x.d - cur[cur.length - 1].d > 1) { groups.push(cur); cur = []; }
+    cur.push(x);
+  }
+  if (cur.length) groups.push(cur);
+  return groups.filter((g) => g.length >= 2).map((g, k) => ({
+    places: g.map((x) => x.p), from: g[0].p.date, to: g[g.length - 1].p.date, color: TRIP_COLORS[k % TRIP_COLORS.length],
+  }));
+}
+// Arc de grand cercle entre deux points [lon, lat] : droit sur le globe, courbe sur la carte plate
+function arc(a, b) {
+  const r = Math.PI / 180, p1 = a[1] * r, p2 = b[1] * r, l1 = a[0] * r, l2 = b[0] * r;
+  const d = 2 * Math.asin(Math.sqrt(Math.sin((p2 - p1) / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin((l2 - l1) / 2) ** 2));
+  if (d < 1e-6) return [a];
+  if (Math.sin(d) < 1e-9) return [a, b];
+  const n = Math.max(2, Math.ceil(d / (2 * r))), pts = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n, A = Math.sin((1 - f) * d) / Math.sin(d), B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(p1) * Math.cos(l1) + B * Math.cos(p2) * Math.cos(l2);
+    const y = A * Math.cos(p1) * Math.sin(l1) + B * Math.cos(p2) * Math.sin(l2);
+    const z = A * Math.sin(p1) + B * Math.sin(p2);
+    pts.push([Math.atan2(y, x) / r, Math.atan2(z, Math.hypot(x, y)) / r]);
+  }
+  return pts;
+}
+function tripLine(t) {
+  const path = [];
+  for (let i = 0; i < t.places.length - 1; i++) {
+    const seg = arc([t.places[i].lon, t.places[i].lat], [t.places[i + 1].lon, t.places[i + 1].lat]);
+    path.push(...(i ? seg.slice(1) : seg));
+  }
+  // évite le saut à l'antiméridien : chaque point reste à moins de 180° du précédent
+  for (let i = 1; i < path.length; i++) {
+    while (path[i][0] - path[i - 1][0] > 180) path[i][0] -= 360;
+    while (path[i][0] - path[i - 1][0] < -180) path[i][0] += 360;
+  }
+  return path;
+}
+let tripsOn = true;
+try { tripsOn = localStorage.getItem("menu:trips") !== "0"; } catch {}
+const visiblePlaces = () => places.filter((p) => active[p.cat]);
+const tripOf = (p) => computeTrips(visiblePlaces()).find((t) => t.places.includes(p));
+
 function drawMarkers() {
   if (!ready) return;
+  map.getSource("trips").setData({
+    type: "FeatureCollection",
+    features: !tripsOn ? [] : computeTrips(visiblePlaces()).map((t) => ({
+      type: "Feature", geometry: { type: "LineString", coordinates: tripLine(t) }, properties: { c: t.color, from: t.from, to: t.to },
+    })),
+  });
   map.getSource("places").setData({
     type: "FeatureCollection",
     features: places.filter((p) => active[p.cat]).map((p) => ({
@@ -126,6 +196,17 @@ function frame(t) {
 }
 requestAnimationFrame(frame);
 
+const tripBtn = $("#trips");
+const syncTripBtn = () => {
+  tripBtn.textContent = tripsOn ? "Trips : oui" : "Trips : non";
+  tripBtn.setAttribute("aria-pressed", String(tripsOn));
+};
+tripBtn.onclick = () => {
+  tripsOn = !tripsOn;
+  try { localStorage.setItem("menu:trips", tripsOn ? "1" : "0"); } catch {}
+  syncTripBtn(); drawMarkers(); renderSel();
+};
+syncTripBtn();
 $("#proj").onclick = () => setProjection(!globe);
 $("#spin").onclick = () => {
   spin = !spin; lastTouch = 0;
@@ -156,7 +237,7 @@ function renderList() {
   const countries = new Set(places.map((p) => p.country).filter(Boolean)).size;
   const stats = $("#stats");
   stats.replaceChildren();
-  for (const [n, label] of [[places.length, "lieux"], [cities, "villes"], [countries, "pays"]]) {
+  for (const [n, label] of [[places.length, "lieux"], [cities, "villes"], [countries, "pays"], [computeTrips(places).length, "trips"]]) {
     const d = document.createElement("div");
     const b = document.createElement("b"); b.textContent = n;
     const s = document.createElement("span"); s.textContent = label;
@@ -202,6 +283,15 @@ function renderSel() {
   const where = document.createElement("p"); where.className = "where";
   where.textContent = [p.city, p.country].filter(Boolean).join(", ");
 
+  const trip = tripsOn ? tripOf(p) : null;
+  const info = document.createElement("p"); info.className = "trip-info";
+  if (trip) {
+    const dot = document.createElement("span"); dot.className = "dot"; dot.style.background = trip.color;
+    const n = trip.places.length;
+    info.append(dot, `Trip du ${fmtDay(trip.from)} au ${fmtDay(trip.to)} · ${n} lieux`);
+  } else if (!p.date) {
+    info.textContent = "Ajoutez une date : les lieux visités à des jours consécutifs sont reliés en trip.";
+  }
   const form = document.createElement("div"); form.className = "form";
   const field = (label, el, id) => {
     const l = document.createElement("label"); l.htmlFor = id; l.append(label); el.id = id; l.append(el); return l;
@@ -213,7 +303,7 @@ function renderSel() {
 
   const date = document.createElement("input");
   date.type = "date"; date.value = p.date || "";
-  date.onchange = () => { p.date = date.value; persist(); };
+  date.onchange = () => { p.date = date.value; persist(); render(); };
 
   const rating = document.createElement("select");
   rating.add(new Option("Pas de note", "0", false, !p.rating));
@@ -239,7 +329,7 @@ function renderSel() {
 
   form.append(field("Catégorie", cat, "f-cat"), field("Date de la visite", date, "f-date"),
               field("Note", rating, "f-rating"), field("Commentaire", note, "f-note"), actions);
-  box.append(h2, where, form);
+  box.append(h2, where, ...(info.childNodes.length ? [info] : []), form);
 }
 
 function render() { renderLegend(); drawMarkers(); renderList(); renderSel(); }
