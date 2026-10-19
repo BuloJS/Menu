@@ -303,7 +303,7 @@ function renderSel() {
 
   const date = document.createElement("input");
   date.type = "date"; date.value = p.date || "";
-  date.onchange = () => { p.date = date.value; persist(); render(); };
+  date.onchange = () => { p.date = date.value; p.dateSet = !!date.value; persist(); render(); };
 
   const rating = document.createElement("select");
   rating.add(new Option("Pas de note", "0", false, !p.rating));
@@ -359,13 +359,25 @@ function persist() {
   }, 600);
 }
 
+// Les premières versions pré-remplissaient la date de visite avec le jour de l'ajout
+// (19 oct. 2026). Ces dates automatiques sont effacées tant que l'utilisateur ne les
+// a pas choisies lui-même (p.dateSet).
+const LEGACY_AUTO_DATE = "2026-10-19";
+let clearedLegacy = false;
+
+function legacyDate(p) {
+  const auto = !p.dateSet && p.date === LEGACY_AUTO_DATE;
+  if (auto) clearedLegacy = true;
+  return auto;
+}
+
 function clean(list) {
   if (!Array.isArray(list)) return [];
   return list
     .filter((p) => p && typeof p.id === "string" && Number.isFinite(p.lat) && Number.isFinite(p.lon) && CATS[p.cat])
     .map((p) => ({
       id: p.id, name: String(p.name || "Sans nom"), city: String(p.city || ""), country: String(p.country || ""),
-      lat: p.lat, lon: p.lon, cat: p.cat, date: String(p.date || ""), rating: Number(p.rating) || 0, note: String(p.note || ""),
+      lat: p.lat, lon: p.lon, cat: p.cat, date: legacyDate(p) ? "" : String(p.date || ""), dateSet: !!p.dateSet && !!p.date, rating: Number(p.rating) || 0, note: String(p.note || ""),
     }));
 }
 
@@ -376,6 +388,7 @@ async function init() {
     const remote = await loadData(APP);
     if (remote && Array.isArray(remote.places)) {
       places = clean(remote.places);
+      if (clearedLegacy) persist();   // enregistre le nettoyage des dates automatiques
       try { localStorage.setItem(LOCAL_KEY, JSON.stringify(places)); } catch {}
       render(); fitAll();
     } else if (places.length) {
@@ -456,7 +469,7 @@ function pick(r) {
   if (!p) {
     p = {
       id: r.id, name: r.name, city: r.city, country: r.country, lat: r.lat, lon: r.lon,
-      cat: r.cat || "restaurant", date: "", rating: 0, note: "",
+      cat: r.cat || "restaurant", date: "", dateSet: false, rating: 0, note: "",
     };
     places.push(p); persist();
   }
