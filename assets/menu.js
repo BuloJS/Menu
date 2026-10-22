@@ -8,6 +8,7 @@ import { loadData, saveData } from "./auth.js";
 
 const APP = "menu";
 const LOCAL_KEY = "menu:places:v1";
+const EXTRA_KEY = "menu:countries:v1";
 const PHOTON = "https://photon.komoot.io/api/";
 
 const CATS = { restaurant: "Restaurant", bar: "Bar", boite: "Boîte" };
@@ -22,6 +23,7 @@ const $ = (s) => document.querySelector(s);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 let places = [];
+let extra = [];   // pays ajoutés à la main, sans lieu : [{ cid, name }]
 let sel = null;
 const active = { restaurant: true, bar: true, boite: true };
 // Filtre par lieu (liste déroulante pays / ville)
@@ -59,8 +61,8 @@ map.on("load", () => {
   // pays visités : teinte douce sous les noms du fond de carte
   const firstSymbol = map.getStyle().layers.find((l) => l.type === "symbol")?.id;
   map.addSource("visited", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  map.addLayer({ id: "visited-fill", type: "fill", source: "visited", paint: { "fill-color": "#5e5ce6", "fill-opacity": 0.32 } }, firstSymbol);
-  map.addLayer({ id: "visited-line", type: "line", source: "visited", paint: { "line-color": "#9a98ff", "line-opacity": 0.75, "line-width": 1.2 } }, firstSymbol);
+  map.addLayer({ id: "visited-fill", type: "fill", source: "visited", paint: { "fill-color": countryColor, "fill-opacity": 0.32 } }, firstSymbol);
+  map.addLayer({ id: "visited-line", type: "line", source: "visited", paint: { "line-color": countryColor, "line-opacity": 0.85, "line-width": 1.2 } }, firstSymbol);
   loadWorld();
   map.addSource("places", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addSource("trips", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -100,8 +102,17 @@ map.on("load", () => {
 
 // ---- pays visités : on retrouve le pays de chaque lieu à partir de ses coordonnées
 const WORLD_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json";
-let world = null, worldLoading = null, visitedKey = "";
+let world = null, worldLoading = null, visitedKey = "", visitedCount = null;
 const countryCache = new Map();
+const COUNTRY_COLORS = [
+  ["#5e5ce6", "Indigo"], ["#0a84ff", "Bleu"], ["#30d158", "Vert"],
+  ["#ffd60a", "Or"], ["#ff6b6b", "Corail"], ["#e5e5ea", "Blanc"],
+];
+let countryColor = COUNTRY_COLORS[0][0];
+try {
+  const saved = localStorage.getItem("menu:countryColor");
+  if (COUNTRY_COLORS.some(([c]) => c === saved)) countryColor = saved;
+} catch {}
 let countriesOn = true;
 try { countriesOn = localStorage.getItem("menu:countries") !== "0"; } catch {}
 
@@ -157,13 +168,15 @@ function loadWorld() {
   worldLoading = fetch(WORLD_URL).then((r) => r.json()).then((t) => {
     world = topojson.feature(t, t.objects.countries).features
       .filter((f) => f.geometry).map((f) => ({ f, box: bboxOf(f.geometry) }));
-    drawCountries();
+    drawCountries(); renderList();
   }).catch(() => { worldLoading = null; });   // hors ligne : pas de teinte, le reste fonctionne
 }
 function drawCountries() {
   if (!ready || !world) return;
   const seen = new Map();
   for (const p of places) { const f = countryOf(p); if (f) seen.set(f.id, f); }
+  for (const e of extra) { const c = world.find((w) => String(w.f.id) === e.cid); if (c) seen.set(c.f.id, c.f); }
+  visitedCount = seen.size;
   map.setLayoutProperty("visited-fill", "visibility", countriesOn ? "visible" : "none");
   map.setLayoutProperty("visited-line", "visibility", countriesOn ? "visible" : "none");
   const key = [...seen.keys()].sort().join(",");
@@ -282,6 +295,28 @@ function frame(t) {
 }
 requestAnimationFrame(frame);
 
+const swatches = $("#swatches");
+function paintCountries() {
+  if (!ready) return;
+  map.setPaintProperty("visited-fill", "fill-color", countryColor);
+  map.setPaintProperty("visited-line", "line-color", countryColor);
+}
+function renderSwatches() {
+  swatches.replaceChildren();
+  swatches.hidden = !countriesOn;
+  for (const [c, name] of COUNTRY_COLORS) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "swatch"; b.style.background = c;
+    b.title = name; b.setAttribute("aria-label", "Couleur des pays : " + name);
+    b.setAttribute("aria-pressed", String(c === countryColor));
+    b.onclick = () => {
+      countryColor = c;
+      try { localStorage.setItem("menu:countryColor", c); } catch {}
+      paintCountries(); renderSwatches();
+    };
+    swatches.append(b);
+  }
+}
 const countryBtn = $("#countries");
 const syncCountryBtn = () => {
   countryBtn.textContent = countriesOn ? "Pays : oui" : "Pays : non";
@@ -290,9 +325,9 @@ const syncCountryBtn = () => {
 countryBtn.onclick = () => {
   countriesOn = !countriesOn;
   try { localStorage.setItem("menu:countries", countriesOn ? "1" : "0"); } catch {}
-  syncCountryBtn(); drawCountries();
+  syncCountryBtn(); renderSwatches(); drawCountries();
 };
-syncCountryBtn();
+syncCountryBtn(); renderSwatches();
 const tripBtn = $("#trips");
 const syncTripBtn = () => {
   tripBtn.textContent = tripsOn ? "Trips : oui" : "Trips : non";
@@ -331,7 +366,7 @@ function renderLegend() {
 
 function renderList() {
   const cities = new Set(places.map((p) => p.city).filter(Boolean)).size;
-  const countries = new Set(places.map((p) => p.country).filter(Boolean)).size;
+  const countries = visitedCount ?? new Set(places.map((p) => p.country).filter(Boolean)).size;
   const stats = $("#stats");
   stats.replaceChildren();
   for (const [n, label] of [[places.length, "lieux"], [cities, "villes"], [countries, "pays"], [computeTrips(places).length, "trips"]]) {
@@ -447,7 +482,21 @@ function renderFilters() {
 $("#f-country").onchange = (e) => { fCountry = e.target.value; fCity = ""; render(); fitAll(); };
 $("#f-city").onchange = (e) => { fCity = e.target.value; render(); fitAll(); };
 
-function render() { renderFilters(); renderLegend(); drawMarkers(); renderList(); renderSel(); }
+function renderExtras() {
+  const box = $("#extras");
+  box.replaceChildren();
+  box.hidden = !extra.length;
+  for (const e of extra) {
+    const chip = document.createElement("span"); chip.className = "tag";
+    const label = document.createElement("span"); label.textContent = e.name;
+    const x = document.createElement("button");
+    x.type = "button"; x.textContent = "×"; x.title = "Retirer ce pays"; x.setAttribute("aria-label", "Retirer " + e.name);
+    x.onclick = () => { extra = extra.filter((y) => y.cid !== e.cid); persist(); render(); };
+    chip.append(label, x); box.append(chip);
+  }
+}
+
+function render() { renderExtras(); renderFilters(); renderLegend(); drawMarkers(); renderList(); renderSel(); }
 
 function select(id, fly) {
   sel = id;
@@ -466,11 +515,11 @@ function setStatus(text, isError = false) {
 
 let saveTimer = null;
 function persist() {
-  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(places)); } catch {}
+  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(places)); localStorage.setItem(EXTRA_KEY, JSON.stringify(extra)); } catch {}
   setStatus("Enregistrement…");
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
-    try { await saveData(APP, { places }); setStatus("Synchronisé"); }
+    try { await saveData(APP, { places, countries: extra }); setStatus("Synchronisé"); }
     catch (e) { setStatus("Non synchronisé : " + e.message, true); }
   }, 600);
 }
@@ -487,6 +536,10 @@ function legacyDate(p) {
   return auto;
 }
 
+const cleanExtra = (list) => (Array.isArray(list) ? list : [])
+  .filter((e) => e && typeof e.cid === "string" && typeof e.name === "string")
+  .map((e) => ({ cid: e.cid, name: e.name }));
+
 function clean(list) {
   if (!Array.isArray(list)) return [];
   return list
@@ -499,15 +552,17 @@ function clean(list) {
 
 async function init() {
   try { places = clean(JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]")); } catch { places = []; }
+  try { extra = cleanExtra(JSON.parse(localStorage.getItem(EXTRA_KEY) || "[]")); } catch { extra = []; }
   render();
   try {
     const remote = await loadData(APP);
     if (remote && Array.isArray(remote.places)) {
       places = clean(remote.places);
+      extra = cleanExtra(remote.countries);
       if (clearedLegacy) persist();   // enregistre le nettoyage des dates automatiques
-      try { localStorage.setItem(LOCAL_KEY, JSON.stringify(places)); } catch {}
+      try { localStorage.setItem(LOCAL_KEY, JSON.stringify(places)); localStorage.setItem(EXTRA_KEY, JSON.stringify(extra)); } catch {}
       render(); fitAll();
-    } else if (places.length) {
+    } else if (places.length || extra.length) {
       persist();
     }
     setStatus("Synchronisé");
@@ -528,7 +583,9 @@ function fromFeature(f) {
   const street = [pr.street, pr.housenumber].filter(Boolean).join(" ");
   const city = pr.city || pr.town || pr.village || pr.district || pr.county || pr.state || "";
   const cat = pr.osm_key === "amenity" ? AMENITY[pr.osm_value] || null : null;
+  const isCountry = pr.osm_key === "place" && pr.osm_value === "country";
   return {
+    kind: isCountry ? "country" : "place",
     id: `${pr.osm_type || "X"}${pr.osm_id ?? c.join(",")}`,
     name: pr.name, street, city, country: pr.country || "", lat: c[1], lon: c[0], cat,
   };
@@ -547,7 +604,8 @@ async function search(text) {
     const data = await res.json();
     results = (data.features || []).map(fromFeature).filter(Boolean);
     // Restaurants, bars et boîtes d'abord, sans changer l'ordre de pertinence à l'intérieur
-    results.sort((a, b) => Number(!!b.cat) - Number(!!a.cat));
+    const rank = (r) => (r.cat ? 0 : r.kind === "country" ? 1 : 2);
+    results.sort((a, b) => rank(a) - rank(b));
     showSug();
   } catch (e) {
     if (e.name === "AbortError") return;
@@ -569,7 +627,8 @@ function showSug(message) {
     const n = document.createElement("span"); n.className = "n"; n.textContent = r.name;
     const c = document.createElement("span"); c.className = "c";
     const where = [r.street, r.city, r.country].filter(Boolean).join(", ");
-    c.textContent = `${r.cat ? CATS[r.cat] : "Autre lieu"} · ${where}`;
+    c.textContent = r.kind === "country" ? "Pays · coloré sur la carte, sans lieu"
+      : `${r.cat ? CATS[r.cat] : "Autre lieu"} · ${where}`;
     txt.append(n, c); li.append(dot, txt);
     li.onmousedown = (e) => { e.preventDefault(); pick(r); };
     sug.append(li);
@@ -579,7 +638,20 @@ function showSug(message) {
 
 function mark() { [...sug.children].forEach((li, i) => li.setAttribute("aria-selected", String(i === idx))); }
 
+function pickCountry(r) {
+  q.value = ""; hideSug();
+  if (!world) { setStatus("Frontières pas encore chargées, réessayez dans un instant.", true); return; }
+  const f = countryOf({ lon: r.lon, lat: r.lat });
+  if (!f) { setStatus("Pays introuvable sur la carte : " + r.name, true); return; }
+  const cid = String(f.id);
+  if (!extra.some((e) => e.cid === cid)) { extra.push({ cid, name: r.name }); persist(); }
+  render();
+  const b = world.find((w) => String(w.f.id) === cid)?.box;
+  if (b) map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 40, maxZoom: 6, duration: reduced ? 0 : 1500 });
+}
+
 function pick(r) {
+  if (r.kind === "country") return pickCountry(r);
   q.value = ""; hideSug();
   let p = places.find((x) => x.id === r.id);
   if (!p) {

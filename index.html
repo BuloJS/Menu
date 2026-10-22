@@ -21,8 +21,8 @@
     <p class="sub">Les restaurants, bars et boîtes où je suis vraiment allé. Tapez un nom pour l'ajouter à la carte.</p>
   </div>
   <div class="search">
-    <input id="q" type="search" placeholder="Rechercher un lieu (ex. Chez Paul Lyon)" autocomplete="off"
-           role="combobox" aria-expanded="false" aria-controls="sug" aria-label="Rechercher un lieu">
+    <input id="q" type="search" placeholder="Rechercher un lieu ou un pays (ex. Chez Paul Lyon, Japon)" autocomplete="off"
+           role="combobox" aria-expanded="false" aria-controls="sug" aria-label="Rechercher un lieu ou un pays">
     <ul class="sug" id="sug" role="listbox" hidden></ul>
   </div>
 </header>
@@ -33,7 +33,8 @@
     <div class="tools">
       <button class="chip" id="proj" type="button">Carte plate</button>
       <button class="chip" id="trips" type="button" aria-pressed="true" title="Relie les lieux visités à des jours consécutifs">Trips : oui</button>
-      <button class="chip" id="countries" type="button" aria-pressed="true" title="Colore les pays où vous avez des lieux">Pays : oui</button>
+      <button class="chip" id="countries" type="button" aria-pressed="true" title="Colore les pays visités">Pays : oui</button>
+      <span class="swatches" id="swatches" role="group" aria-label="Couleur des pays"></span>
       <button class="chip" id="spin" type="button" aria-pressed="true">Rotation : oui</button>
     </div>
     <div class="legend" id="legend"></div>
@@ -42,6 +43,7 @@
   <aside class="side">
     <section class="panel">
       <div class="stats" id="stats"></div>
+      <div class="extras" id="extras" hidden></div>
       <div class="filters" id="filters" hidden>
         <select id="f-country" aria-label="Filtrer par pays"></select>
         <select id="f-city" aria-label="Filtrer par ville"></select>

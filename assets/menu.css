@@ -122,3 +122,15 @@ textarea { resize: vertical; min-height: 64px; }
 
 .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
 .filters select { font-size: 13px; padding: 6px 8px; min-width: 0; }
+
+.swatches { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px; }
+.swatches[hidden] { display: none; }
+.swatch { width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .25); cursor: pointer; }
+.swatch[aria-pressed="true"] { border-color: #fff; box-shadow: 0 0 0 2px rgba(0, 0, 0, .6); }
+.extras { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.extras[hidden] { display: none; }
+.tag { display: inline-flex; align-items: center; gap: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 99px; padding: 3px 4px 3px 10px; font-size: 13px; }
+.tag button { border: 0; background: none; color: var(--muted); font-size: 15px; line-height: 1; padding: 0 6px; cursor: pointer; border-radius: 99px; }
+.tag button:hover { color: var(--text); }
+
+[hidden] { display: none !important; }
