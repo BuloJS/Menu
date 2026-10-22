@@ -124,7 +124,7 @@ map.on("load", () => {
   const deptTip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 10, className: "tip" });
   map.on("mousemove", (e) => {
     if (!(deptsOn && deptEdit && deptFeats) || map.queryRenderedFeatures(e.point, { layers: PIN_LAYERS }).length) { deptTip.remove(); return; }
-    const d = deptOf(e.lngLat.lng, e.lngLat.lat);
+    const d = deptOf(e.lngLat.lng, e.lngLat.lat, false);
     if (!d) { deptTip.remove(); return; }
     map.getCanvas().style.cursor = "pointer";
     deptTip.setLngLat(e.lngLat).setText(`${d.code} · ${d.nom}${checkedDepts().has(d.code) ? " ✓" : ""}`).addTo(map);
@@ -253,7 +253,8 @@ function loadWorld() {
     let feats = topojson.feature(t, t.objects.countries).features.filter((f) => f.geometry);
     if (uk?.features?.length) feats = feats.filter((f) => String(f.id) !== "826").concat(uk.features);
     world = buildUnits(feats);
-    drawCountries(); renderList();
+    deptCache.clear(); drawDepts();
+    drawCountries(); renderList(); renderDeptPanel();
   }).catch(() => { worldLoading = null; });   // hors ligne : pas de teinte, le reste fonctionne
 }
 function drawCountries() {
@@ -292,9 +293,21 @@ function loadDepts() {
     drawDepts(); drawCountries(); renderDeptPanel();
   }).catch(() => {});
 }
-function deptOf(lon, lat) {
+// Un point au-delà de la frontière (Ardennes belges, Luxembourg, Suisse…) ne doit jamais tomber dans un département.
+function insideForeign(lon, lat) {
+  if (!world) return false;
+  for (const c of world) {
+    if (String(c.f.id).startsWith("250")) continue;
+    const [x0, y0, x1, y1] = c.box;
+    if (lon < x0 || lon > x1 || lat < y0 || lat > y1) continue;
+    if (polysOf(c.f.geometry).some((poly) => inPoly(lon, lat, poly))) return true;
+  }
+  return false;
+}
+// near = true : tolère un point côtier tombé en mer (lieux enregistrés). Pour un clic sur la carte, near = false.
+function deptOf(lon, lat, near = true) {
   if (!deptFeats) return null;
-  const key = lon.toFixed(4) + "," + lat.toFixed(4);
+  const key = lon.toFixed(4) + "," + lat.toFixed(4) + (near ? "n" : "");
   if (deptCache.has(key)) return deptCache.get(key);
   let hit = null;
   for (const d of deptFeats) {
@@ -302,10 +315,10 @@ function deptOf(lon, lat) {
     if (lon < x0 || lon > x1 || lat < y0 || lat > y1) continue;
     if (polysOf(d.f.geometry).some((poly) => inPoly(lon, lat, poly))) { hit = d; break; }
   }
-  if (!hit && lon > -6 && lon < 10 && lat > 41 && lat < 52) {   // point côtier tombé en mer : département à moins de 15 km
-    let best = 15;
+  if (!hit && near && lon > -6 && lon < 10 && lat > 41 && lat < 52 && !insideForeign(lon, lat)) {
+    let best = 8;   // km
     for (const d of deptFeats) {
-      if (lon < d.box[0] - 0.3 || lon > d.box[2] + 0.3 || lat < d.box[1] - 0.3 || lat > d.box[3] + 0.3) continue;
+      if (lon < d.box[0] - 0.2 || lon > d.box[2] + 0.2 || lat < d.box[1] - 0.2 || lat > d.box[3] + 0.2) continue;
       const k = nearKm(lon, lat, d.f.geometry);
       if (k < best) { best = k; hit = d; }
     }
@@ -336,7 +349,7 @@ function toggleDept(code) {
   persist(); drawDepts(); renderDeptPanel();
 }
 function toggleDeptAt(lon, lat) {
-  const d = deptOf(lon, lat);
+  const d = deptOf(lon, lat, false);
   if (!d) return;
   if (autoDepts().has(d.code)) { setStatus(`${d.nom} est déjà coché par un lieu.`); return; }
   toggleDept(d.code);
