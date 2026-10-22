@@ -24,6 +24,10 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
 let places = [];
 let sel = null;
 const active = { restaurant: true, bar: true, boite: true };
+// Filtre par lieu (liste déroulante pays / ville)
+let fCountry = "", fCity = "";
+const inScope = (p) => (!fCountry || p.country === fCountry) && (!fCity || p.city === fCity);
+const isShown = (p) => active[p.cat] && inScope(p);
 
 // ---------------------------------------------------------------- carte --
 // MapLibre GL : globe 3D + fond vectoriel sombre CARTO (données OpenStreetMap).
@@ -143,7 +147,7 @@ function tripLine(t) {
 }
 let tripsOn = true;
 try { tripsOn = localStorage.getItem("menu:trips") !== "0"; } catch {}
-const visiblePlaces = () => places.filter((p) => active[p.cat]);
+const visiblePlaces = () => places.filter(isShown);
 const tripOf = (p) => computeTrips(visiblePlaces()).find((t) => t.places.includes(p));
 
 function drawMarkers() {
@@ -156,7 +160,7 @@ function drawMarkers() {
   });
   map.getSource("places").setData({
     type: "FeatureCollection",
-    features: places.filter((p) => active[p.cat]).map((p) => ({
+    features: places.filter(isShown).map((p) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [p.lon, p.lat] },
       properties: { id: p.id, name: p.name, cat: p.cat, sel: p.id === sel ? 1 : 0 },
@@ -165,10 +169,11 @@ function drawMarkers() {
 }
 
 function fitAll() {
-  if (!ready || !places.length) return;
-  if (places.length === 1) return map.jumpTo({ center: [places[0].lon, places[0].lat], zoom: 12 });
+  const list = places.filter(inScope);
+  if (!ready || !list.length) return;
+  if (list.length === 1) return map.jumpTo({ center: [list[0].lon, list[0].lat], zoom: 12 });
   const b = new maplibregl.LngLatBounds();
-  places.forEach((p) => b.extend([p.lon, p.lat]));
+  list.forEach((p) => b.extend([p.lon, p.lat]));
   map.fitBounds(b, { padding: 60, maxZoom: 12, duration: reduced ? 0 : 1800 });
 }
 
@@ -226,7 +231,7 @@ function renderLegend() {
     b.setAttribute("aria-pressed", String(active[c]));
     const dot = document.createElement("span");
     dot.className = "dot " + c;
-    b.append(dot, `${CATS[c]} · ${places.filter((p) => p.cat === c).length}`);
+    b.append(dot, `${CATS[c]} · ${places.filter((p) => inScope(p) && p.cat === c).length}`);
     b.onclick = () => { active[c] = !active[c]; render(); };
     box.append(b);
   }
@@ -246,7 +251,7 @@ function renderList() {
 
   const list = $("#list");
   list.replaceChildren();
-  const shown = places.filter((p) => active[p.cat]);
+  const shown = places.filter(isShown);
   if (!places.length) {
     const p = document.createElement("p");
     p.className = "hint";
@@ -332,11 +337,30 @@ function renderSel() {
   box.append(h2, where, ...(info.childNodes.length ? [info] : []), form);
 }
 
-function render() { renderLegend(); drawMarkers(); renderList(); renderSel(); }
+function renderFilters() {
+  const bar = $("#filters"), selC = $("#f-country"), selV = $("#f-city");
+  const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr"));
+  const countries = uniq(places.map((p) => p.country));
+  if (fCountry && !countries.includes(fCountry)) fCountry = "";
+  const cities = uniq(places.filter((p) => !fCountry || p.country === fCountry).map((p) => p.city));
+  if (fCity && !cities.includes(fCity)) fCity = "";
+  const fill = (el, all, values, current) => {
+    el.replaceChildren(new Option(all, ""), ...values.map((v) => new Option(v, v)));
+    el.value = current;
+  };
+  fill(selC, "Tous les pays", countries, fCountry);
+  fill(selV, "Toutes les villes", cities, fCity);
+  bar.hidden = places.length < 2;
+}
+$("#f-country").onchange = (e) => { fCountry = e.target.value; fCity = ""; render(); fitAll(); };
+$("#f-city").onchange = (e) => { fCity = e.target.value; render(); fitAll(); };
+
+function render() { renderFilters(); renderLegend(); drawMarkers(); renderList(); renderSel(); }
 
 function select(id, fly) {
   sel = id;
   const p = places.find((x) => x.id === id);
+  if (p && !inScope(p)) { fCountry = ""; fCity = ""; }
   if (p) { active[p.cat] = true; if (fly) flyTo(p, Math.max(map.getZoom(), 15)); }
   render();
 }

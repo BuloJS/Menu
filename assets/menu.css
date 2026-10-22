@@ -119,3 +119,6 @@ textarea { resize: vertical; min-height: 64px; }
 .status.err { color: var(--red); }
 
 .trip-info { display: flex; align-items: center; gap: 8px; margin: -4px 0 12px; color: var(--muted); font-size: 13px; }
+
+.filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.filters select { font-size: 13px; padding: 6px 8px; min-width: 0; }
