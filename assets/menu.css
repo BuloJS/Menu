@@ -134,3 +134,12 @@ textarea { resize: vertical; min-height: 64px; }
 .tag button:hover { color: var(--text); }
 
 [hidden] { display: none !important; }
+
+#deptbox summary { cursor: pointer; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
+#deptbox summary span { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+#deptq { width: 100%; margin: 10px 0 6px; font: inherit; font-size: 14px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
+.deptlist { max-height: 300px; overflow: auto; display: grid; gap: 1px; }
+.dept { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+.dept:hover { background: var(--surface-hover); }
+.dept small { margin-left: auto; color: var(--muted); font-size: 12px; }
+.dept input { accent-color: var(--blue); }

@@ -35,6 +35,8 @@
       <button class="chip" id="trips" type="button" aria-pressed="true" title="Relie les lieux visités à des jours consécutifs">Trips : oui</button>
       <button class="chip" id="countries" type="button" aria-pressed="true" title="Colore les pays visités">Pays : oui</button>
       <span class="swatches" id="swatches" role="group" aria-label="Couleur des pays"></span>
+      <button class="chip" id="deptbtn" type="button" aria-pressed="true" title="Colore la France département par département">Départements : oui</button>
+      <button class="chip" id="deptedit" type="button" aria-pressed="false" title="Un clic sur un département le coche ou le décoche">Cocher sur la carte : non</button>
       <button class="chip" id="spin" type="button" aria-pressed="true">Rotation : oui</button>
     </div>
     <div class="legend" id="legend"></div>
@@ -50,6 +52,11 @@
       </div>
       <div class="list" id="list"></div>
     </section>
+    <details class="panel" id="deptbox">
+      <summary>Départements de France <span id="deptcount"></span></summary>
+      <input id="deptq" type="search" placeholder="Filtrer (ex. 13, Rhône)" aria-label="Filtrer les départements" autocomplete="off">
+      <div class="deptlist" id="deptlist"></div>
+    </details>
     <section class="panel" id="sel"></section>
     <p class="status" id="status" role="status"></p>
   </aside>

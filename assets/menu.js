@@ -9,6 +9,7 @@ import { loadData, saveData } from "./auth.js";
 const APP = "menu";
 const LOCAL_KEY = "menu:places:v1";
 const EXTRA_KEY = "menu:countries:v1";
+const DEPT_KEY = "menu:depts:v1";
 const PHOTON = "https://photon.komoot.io/api/";
 
 const CATS = { restaurant: "Restaurant", bar: "Bar", boite: "Boîte" };
@@ -25,6 +26,7 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
 
 let places = [];
 let extra = [];   // pays ajoutés à la main, sans lieu : [{ cid, name }]
+let depts = [];   // départements cochés à la main : codes ("01", "2A", "75"…)
 let sel = null;
 const active = { restaurant: true, bar: true, boite: true };
 // Filtre par lieu (liste déroulante pays / ville)
@@ -65,6 +67,11 @@ map.on("load", () => {
   map.addLayer({ id: "visited-fill", type: "fill", source: "visited", paint: { "fill-color": countryColor, "fill-opacity": 0.32 } }, firstSymbol);
   map.addLayer({ id: "visited-line", type: "line", source: "visited", paint: { "line-color": countryColor, "line-opacity": 0.85, "line-width": 1.2 } }, firstSymbol);
   loadWorld();
+  map.addSource("depts", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({ id: "dept-fill", type: "fill", source: "depts", filter: ["==", ["get", "v"], 1], paint: { "fill-color": countryColor, "fill-opacity": 0.55 } }, firstSymbol);
+  map.addLayer({ id: "dept-line", type: "line", source: "depts", paint: {
+    "line-color": "#ffffff", "line-opacity": 0.22, "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.3, 8, 0.9] } }, firstSymbol);
+  loadDepts();
   map.addSource("places", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addSource("trips", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   // halo lumineux, point, anneau de sélection, anneau qui pulse
@@ -92,8 +99,18 @@ map.on("load", () => {
   });
   map.on("mouseleave", "dots", () => { map.getCanvas().style.cursor = ""; tip.remove(); });
   map.on("click", "dots", (e) => select(e.features[0].properties.id, false));
+  const deptTip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 10, className: "tip" });
+  map.on("mousemove", (e) => {
+    if (!(deptsOn && deptEdit && deptFeats) || map.queryRenderedFeatures(e.point, { layers: ["dots"] }).length) { deptTip.remove(); return; }
+    const d = deptOf(e.lngLat.lng, e.lngLat.lat);
+    if (!d) { deptTip.remove(); return; }
+    map.getCanvas().style.cursor = "pointer";
+    deptTip.setLngLat(e.lngLat).setText(`${d.code} · ${d.nom}${checkedDepts().has(d.code) ? " ✓" : ""}`).addTo(map);
+  });
   map.on("click", (e) => {
-    if (!map.queryRenderedFeatures(e.point, { layers: ["dots"] }).length) { sel = null; render(); }
+    if (map.queryRenderedFeatures(e.point, { layers: ["dots"] }).length) return;
+    if (deptsOn && deptEdit && deptFeats) { toggleDeptAt(e.lngLat.lng, e.lngLat.lat); return; }
+    sel = null; render();
   });
 
   ready = true;
@@ -230,11 +247,102 @@ function drawCountries() {
   visitedCount = seen.size;
   map.setLayoutProperty("visited-fill", "visibility", countriesOn ? "visible" : "none");
   map.setLayoutProperty("visited-line", "visibility", countriesOn ? "visible" : "none");
-  const key = [...seen.keys()].sort().join(",");
+  const hideFrance = deptsOn && !!deptFeats;   // la France est alors colorée département par département
+  const key = [...seen.keys()].sort().join(",") + (hideFrance ? "|d" : "");
   if (key === visitedKey) return;
   visitedKey = key;
-  map.getSource("visited").setData({ type: "FeatureCollection", features: [...seen.values()] });
+  map.getSource("visited").setData({
+    type: "FeatureCollection",
+    features: [...seen.values()].filter((f) => !(hideFrance && String(f.id) === "250")),
+  });
 }
+
+// ---- départements de la France métropolitaine (gregoiredavid/france-geojson, version simplifiée)
+const DEPT_URL = "assets/departements.json";
+let deptFeats = null, deptKey = "";
+let deptsOn = true, deptEdit = false;
+try { deptsOn = localStorage.getItem("menu:depts") !== "0"; } catch {}
+const deptCache = new Map();
+
+function loadDepts() {
+  fetch(DEPT_URL).then((r) => r.json()).then((d) => {
+    deptFeats = d.features.map((f) => ({ f, code: f.properties.code, nom: f.properties.nom, box: bboxOf(f.geometry) }));
+    drawDepts(); drawCountries(); renderDeptPanel();
+  }).catch(() => {});
+}
+function deptOf(lon, lat) {
+  if (!deptFeats) return null;
+  const key = lon.toFixed(4) + "," + lat.toFixed(4);
+  if (deptCache.has(key)) return deptCache.get(key);
+  let hit = null;
+  for (const d of deptFeats) {
+    const [x0, y0, x1, y1] = d.box;
+    if (lon < x0 || lon > x1 || lat < y0 || lat > y1) continue;
+    if (polysOf(d.f.geometry).some((poly) => inPoly(lon, lat, poly))) { hit = d; break; }
+  }
+  if (!hit && lon > -6 && lon < 10 && lat > 41 && lat < 52) {   // point côtier tombé en mer : département à moins de 15 km
+    let best = 15;
+    for (const d of deptFeats) {
+      if (lon < d.box[0] - 0.3 || lon > d.box[2] + 0.3 || lat < d.box[1] - 0.3 || lat > d.box[3] + 0.3) continue;
+      const k = nearKm(lon, lat, d.f.geometry);
+      if (k < best) { best = k; hit = d; }
+    }
+  }
+  deptCache.set(key, hit);
+  return hit;
+}
+const autoDepts = () => new Set(places.map((p) => deptOf(p.lon, p.lat)?.code).filter(Boolean));
+const checkedDepts = () => new Set([...autoDepts(), ...depts]);
+
+function drawDepts() {
+  if (!ready || !deptFeats) return;
+  const on = checkedDepts();
+  const vis = deptsOn ? "visible" : "none";
+  map.setLayoutProperty("dept-fill", "visibility", vis);
+  map.setLayoutProperty("dept-line", "visibility", vis);
+  const key = [...on].sort().join(",");
+  if (key === deptKey) return;
+  deptKey = key;
+  map.getSource("depts").setData({
+    type: "FeatureCollection",
+    features: deptFeats.map((d) => ({ type: "Feature", geometry: d.f.geometry, properties: { code: d.code, v: on.has(d.code) ? 1 : 0 } })),
+  });
+}
+function toggleDept(code) {
+  if (autoDepts().has(code)) return;   // déjà coché par un lieu : on le retire en retirant le lieu
+  depts = depts.includes(code) ? depts.filter((c) => c !== code) : [...depts, code];
+  persist(); drawDepts(); renderDeptPanel();
+}
+function toggleDeptAt(lon, lat) {
+  const d = deptOf(lon, lat);
+  if (!d) return;
+  if (autoDepts().has(d.code)) { setStatus(`${d.nom} est déjà coché par un lieu.`); return; }
+  toggleDept(d.code);
+}
+function renderDeptPanel() {
+  const box = $("#deptbox");
+  if (!deptFeats) return;
+  const auto = autoDepts(), on = checkedDepts();
+  $("#deptcount").textContent = `${on.size} / ${deptFeats.length}`;
+  if (!box.open) return;
+  const list = $("#deptlist"), top = list.scrollTop;
+  const t = norm($("#deptq").value || "");
+  list.replaceChildren();
+  for (const d of deptFeats.filter((x) => !t || norm(x.code + " " + x.nom).includes(t))
+      .sort((a, b) => a.code.localeCompare(b.code, "fr", { numeric: true }))) {
+    const row = document.createElement("label"); row.className = "dept";
+    const cb = document.createElement("input"); cb.type = "checkbox";
+    cb.checked = on.has(d.code); cb.disabled = auto.has(d.code);
+    cb.onchange = () => toggleDept(d.code);
+    const name = document.createElement("span"); name.textContent = `${d.code} · ${d.nom}`;
+    row.append(cb, name);
+    if (auto.has(d.code)) { const m = document.createElement("small"); m.textContent = "via un lieu"; row.append(m); }
+    list.append(row);
+  }
+  list.scrollTop = top;
+}
+$("#deptbox").ontoggle = renderDeptPanel;
+$("#deptq").oninput = renderDeptPanel;
 
 // ---- trips : des lieux visités à des jours consécutifs sont reliés dans l'ordre
 const DAY = 864e5;
@@ -351,6 +459,7 @@ function paintCountries() {
   if (!ready) return;
   map.setPaintProperty("visited-fill", "fill-color", countryColor);
   map.setPaintProperty("visited-line", "line-color", countryColor);
+  map.setPaintProperty("dept-fill", "fill-color", countryColor);
 }
 function renderSwatches() {
   swatches.replaceChildren();
@@ -368,6 +477,23 @@ function renderSwatches() {
     swatches.append(b);
   }
 }
+const deptBtn = $("#deptbtn"), editBtn = $("#deptedit");
+function syncDeptBtns() {
+  deptBtn.textContent = deptsOn ? "Départements : oui" : "Départements : non";
+  deptBtn.setAttribute("aria-pressed", String(deptsOn));
+  editBtn.hidden = !deptsOn;
+  editBtn.textContent = deptEdit ? "Cocher sur la carte : oui" : "Cocher sur la carte : non";
+  editBtn.setAttribute("aria-pressed", String(deptEdit));
+  if (ready) map.getCanvas().style.cursor = "";
+}
+deptBtn.onclick = () => {
+  deptsOn = !deptsOn;
+  if (!deptsOn) deptEdit = false;
+  try { localStorage.setItem("menu:depts", deptsOn ? "1" : "0"); } catch {}
+  syncDeptBtns(); drawDepts(); drawCountries();
+};
+editBtn.onclick = () => { deptEdit = !deptEdit; syncDeptBtns(); };
+syncDeptBtns();
 const countryBtn = $("#countries");
 const syncCountryBtn = () => {
   countryBtn.textContent = countriesOn ? "Pays : oui" : "Pays : non";
@@ -547,7 +673,7 @@ function renderExtras() {
   }
 }
 
-function render() { renderExtras(); renderFilters(); renderLegend(); drawMarkers(); renderList(); renderSel(); }
+function render() { drawDepts(); renderDeptPanel(); renderExtras(); renderFilters(); renderLegend(); drawMarkers(); renderList(); renderSel(); }
 
 function select(id, fly) {
   sel = id;
@@ -566,11 +692,11 @@ function setStatus(text, isError = false) {
 
 let saveTimer = null;
 function persist() {
-  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(places)); localStorage.setItem(EXTRA_KEY, JSON.stringify(extra)); } catch {}
+  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(places)); localStorage.setItem(EXTRA_KEY, JSON.stringify(extra)); localStorage.setItem(DEPT_KEY, JSON.stringify(depts)); } catch {}
   setStatus("Enregistrement…");
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
-    try { await saveData(APP, { places, countries: extra }); setStatus("Synchronisé"); }
+    try { await saveData(APP, { places, countries: extra, depts }); setStatus("Synchronisé"); }
     catch (e) { setStatus("Non synchronisé : " + e.message, true); }
   }, 600);
 }
@@ -594,6 +720,7 @@ const UK_NAMES = {
   "irlande du nord": "826-NIR", "northern ireland": "826-NIR",
 };
 let migratedExtra = false;
+const cleanDepts = (list) => [...new Set((Array.isArray(list) ? list : []).filter((c) => typeof c === "string" && /^\d{2}$|^2[AB]$/.test(c)))];
 const cleanExtra = (list) => (Array.isArray(list) ? list : [])
   .filter((e) => e && typeof e.cid === "string" && typeof e.name === "string")
   .map((e) => {
@@ -615,16 +742,18 @@ function clean(list) {
 async function init() {
   try { places = clean(JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]")); } catch { places = []; }
   try { extra = cleanExtra(JSON.parse(localStorage.getItem(EXTRA_KEY) || "[]")); } catch { extra = []; }
+  try { depts = cleanDepts(JSON.parse(localStorage.getItem(DEPT_KEY) || "[]")); } catch { depts = []; }
   render();
   try {
     const remote = await loadData(APP);
     if (remote && Array.isArray(remote.places)) {
       places = clean(remote.places);
       extra = cleanExtra(remote.countries);
+      depts = cleanDepts(remote.depts);
       if (clearedLegacy || migratedExtra) persist();   // enregistre les nettoyages (dates automatiques, nations)
-      try { localStorage.setItem(LOCAL_KEY, JSON.stringify(places)); localStorage.setItem(EXTRA_KEY, JSON.stringify(extra)); } catch {}
+      try { localStorage.setItem(LOCAL_KEY, JSON.stringify(places)); localStorage.setItem(EXTRA_KEY, JSON.stringify(extra)); localStorage.setItem(DEPT_KEY, JSON.stringify(depts)); } catch {}
       render(); fitAll();
-    } else if (places.length || extra.length) {
+    } else if (places.length || extra.length || depts.length) {
       persist();
     }
     setStatus("Synchronisé");
