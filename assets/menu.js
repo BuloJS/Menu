@@ -164,11 +164,21 @@ function countryOf(p) {
   countryCache.set(key, hit);
   return hit;
 }
+// Le Royaume-Uni (826) est remplacé par ses quatre nations (Natural Earth, subunits 50 m)
+const UK_NATIONS = "assets/uk-nations.json";
+const UK_IDS = ["826-ENG", "826-SCT", "826-WLS", "826-NIR"];
+// Relations OpenStreetMap renvoyées par la recherche → polygone
+const UK_BY_OSM = { 62149: "826", 58447: "826-ENG", 58446: "826-SCT", 58437: "826-WLS", 156393: "826-NIR" };
+
 function loadWorld() {
   if (worldLoading || typeof topojson === "undefined") return;
-  worldLoading = fetch(WORLD_URL).then((r) => r.json()).then((t) => {
-    world = topojson.feature(t, t.objects.countries).features
-      .filter((f) => f.geometry).map((f) => ({ f, box: bboxOf(f.geometry) }));
+  worldLoading = Promise.all([
+    fetch(WORLD_URL).then((r) => r.json()),
+    fetch(UK_NATIONS).then((r) => r.json()).catch(() => null),
+  ]).then(([t, uk]) => {
+    let feats = topojson.feature(t, t.objects.countries).features.filter((f) => f.geometry);
+    if (uk?.features?.length) feats = feats.filter((f) => String(f.id) !== "826").concat(uk.features);
+    world = feats.map((f) => ({ f, box: bboxOf(f.geometry) }));
     drawCountries(); renderList();
   }).catch(() => { worldLoading = null; });   // hors ligne : pas de teinte, le reste fonctionne
 }
@@ -176,7 +186,12 @@ function drawCountries() {
   if (!ready || !world) return;
   const seen = new Map();
   for (const p of places) { const f = countryOf(p); if (f) seen.set(f.id, f); }
-  for (const e of extra) { const c = world.find((w) => String(w.f.id) === e.cid); if (c) seen.set(c.f.id, c.f); }
+  for (const e of extra) {
+    for (const id of e.cid === "826" ? UK_IDS : [e.cid]) {
+      const c = world.find((w) => String(w.f.id) === id);
+      if (c) seen.set(c.f.id, c.f);
+    }
+  }
   visitedCount = seen.size;
   map.setLayoutProperty("visited-fill", "visibility", countriesOn ? "visible" : "none");
   map.setLayoutProperty("visited-line", "visibility", countriesOn ? "visible" : "none");
@@ -537,9 +552,20 @@ function legacyDate(p) {
   return auto;
 }
 
+// Anciennes entrées « Angleterre » & co enregistrées avec le Royaume-Uni entier (826) : on les rattache à leur nation.
+const UK_NAMES = {
+  angleterre: "826-ENG", england: "826-ENG", ecosse: "826-SCT", scotland: "826-SCT",
+  "pays de galles": "826-WLS", galles: "826-WLS", wales: "826-WLS",
+  "irlande du nord": "826-NIR", "northern ireland": "826-NIR",
+};
+let migratedExtra = false;
 const cleanExtra = (list) => (Array.isArray(list) ? list : [])
   .filter((e) => e && typeof e.cid === "string" && typeof e.name === "string")
-  .map((e) => ({ cid: e.cid, name: e.name }));
+  .map((e) => {
+    const nation = e.cid === "826" ? UK_NAMES[norm(e.name)] : null;
+    if (nation) migratedExtra = true;
+    return { cid: nation || e.cid, name: e.name };
+  });
 
 function clean(list) {
   if (!Array.isArray(list)) return [];
@@ -560,7 +586,7 @@ async function init() {
     if (remote && Array.isArray(remote.places)) {
       places = clean(remote.places);
       extra = cleanExtra(remote.countries);
-      if (clearedLegacy) persist();   // enregistre le nettoyage des dates automatiques
+      if (clearedLegacy || migratedExtra) persist();   // enregistre les nettoyages (dates automatiques, nations)
       try { localStorage.setItem(LOCAL_KEY, JSON.stringify(places)); localStorage.setItem(EXTRA_KEY, JSON.stringify(extra)); } catch {}
       render(); fitAll();
     } else if (places.length || extra.length) {
@@ -589,6 +615,7 @@ function fromFeature(f) {
     (pr.osm_key === "place" && ["country", "state", "region"].includes(pr.osm_value));
   return {
     kind: isCountry ? "country" : "place",
+    osmId: pr.osm_type === "R" ? pr.osm_id : null,
     id: `${pr.osm_type || "X"}${pr.osm_id ?? c.join(",")}`,
     name: pr.name, street, city, country: pr.country || "", lat: c[1], lon: c[0], cat,
   };
@@ -657,12 +684,13 @@ function mark() { [...sug.children].forEach((li, i) => li.setAttribute("aria-sel
 function pickCountry(r) {
   q.value = ""; hideSug();
   if (!world) { setStatus("Frontières pas encore chargées, réessayez dans un instant.", true); return; }
-  const f = countryOf({ lon: r.lon, lat: r.lat });
-  if (!f) { setStatus("Pays introuvable sur la carte : " + r.name, true); return; }
-  const cid = String(f.id);
+  const known = UK_BY_OSM[r.osmId];
+  const f = known ? null : countryOf({ lon: r.lon, lat: r.lat });
+  if (!known && !f) { setStatus("Pays introuvable sur la carte : " + r.name, true); return; }
+  const cid = known || String(f.id);
   if (!extra.some((e) => e.cid === cid)) { extra.push({ cid, name: r.name }); persist(); }
   render();
-  const b = world.find((w) => String(w.f.id) === cid)?.box;
+  const b = world.find((w) => String(w.f.id) === (cid === "826" ? "826-ENG" : cid))?.box;
   if (b) map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 40, maxZoom: 6, duration: reduced ? 0 : 1500 });
 }
 

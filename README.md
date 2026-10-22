@@ -8,6 +8,7 @@ Carte du monde des restaurants, bars et boîtes où je suis allé.
   et se corrige à la main dans la fiche.
 - **Carte** : [MapLibre GL](https://maplibre.org) en globe 3D (bouton pour passer à la carte plate), fond vectoriel sombre CARTO, données OpenStreetMap.
 - **Pays visités** : teinte sur les pays où il y a au moins un lieu (bouton « Pays »). Le pays est retrouvé à partir des coordonnées, avec les frontières Natural Earth (world-atlas).
+- **Nations du Royaume-Uni** : Angleterre, Écosse, Pays de Galles et Irlande du Nord sont des pays séparés (`assets/uk-nations.json`, Natural Earth subunits 50 m, domaine public).
 - **Fiche** : catégorie, date de visite, note sur 5, commentaire.
 - **Accès** : protégé par la session ouverte sur Home (`assets/guard.js`).
 - **Données** : table `user_data` de Home, ligne `app = "menu"`, isolée par
