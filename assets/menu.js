@@ -12,7 +12,7 @@ const EXTRA_KEY = "menu:countries:v1";
 const DEPT_KEY = "menu:depts:v1";
 const PHOTON = "https://photon.komoot.io/api/";
 
-const CATS = { restaurant: "Restaurant", bar: "Bar", boite: "Boîte" };
+const CATS = { restaurant: "Restaurant", bar: "Bar", boite: "Boîte", ski: "⛷ Station de ski" };
 // Valeur OSM `amenity` → catégorie de la carte
 const AMENITY = {
   restaurant: "restaurant", cafe: "restaurant", fast_food: "restaurant", food_court: "restaurant", ice_cream: "restaurant",
@@ -45,8 +45,24 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
 
 let ready = false, globe = true, spin = !reduced, lastTouch = 0;
+const PIN_LAYERS = ["dots", "ski"];
 const colorOf = () => ["match", ["get", "cat"],
-  "restaurant", css("--resto"), "bar", css("--bar"), "boite", css("--boite"), "#8e8e93"];
+  "restaurant", css("--resto"), "bar", css("--bar"), "boite", css("--boite"), "ski", css("--ski"), "#8e8e93"];
+
+// Pictogramme « sommet enneigé » des stations de ski (dessiné ici, pas de police d'icônes à charger)
+function peakImage() {
+  const n = 64, cv = document.createElement("canvas");
+  cv.width = cv.height = n;
+  const g = cv.getContext("2d");
+  g.lineJoin = "round";
+  g.beginPath(); g.moveTo(5, 52); g.lineTo(25, 14); g.lineTo(35, 31); g.lineTo(43, 21); g.lineTo(59, 52); g.closePath();
+  g.lineWidth = 7; g.strokeStyle = "#0b0c0f"; g.stroke();
+  g.fillStyle = css("--ski"); g.fill();
+  g.fillStyle = "#ffffff";
+  g.beginPath(); g.moveTo(25, 14); g.lineTo(18.5, 27); g.lineTo(22.5, 24); g.lineTo(25.5, 29); g.lineTo(29, 24); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(43, 21); g.lineTo(38.5, 29.5); g.lineTo(43, 27.5); g.lineTo(47.5, 30); g.closePath(); g.fill();
+  return g.getImageData(0, 0, n, n);
+}
 
 function setProjection(isGlobe) {
   globe = isGlobe;
@@ -83,9 +99,13 @@ map.on("load", () => {
   map.addLayer({ id: "trip-line", type: "line", source: "trips", layout: { "line-cap": "round", "line-join": "round" }, paint: {
     "line-color": ["get", "c"], "line-opacity": 0.95,
     "line-width": ["interpolate", ["linear"], ["zoom"], 1, 1.4, 10, 2.6, 16, 4] } }, "glow");
-  map.addLayer({ id: "dots", type: "circle", source: "places", paint: {
+  map.addLayer({ id: "dots", type: "circle", source: "places", filter: ["!=", ["get", "cat"], "ski"], paint: {
     "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 3.5, 10, 7, 16, 10],
     "circle-color": colorOf(), "circle-stroke-color": "#0b0c0f", "circle-stroke-width": 1.5 } });
+  map.addImage("peak", peakImage(), { pixelRatio: 2 });
+  map.addLayer({ id: "ski", type: "symbol", source: "places", filter: ["==", ["get", "cat"], "ski"], layout: {
+    "icon-image": "peak", "icon-allow-overlap": true, "icon-ignore-placement": true,
+    "icon-size": ["interpolate", ["linear"], ["zoom"], 1, 0.5, 10, 0.75, 16, 1] } });
   map.addLayer({ id: "sel", type: "circle", source: "places", filter: ["==", ["get", "sel"], 1], paint: {
     "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 7, 10, 11, 16, 15],
     "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#fff", "circle-stroke-width": 2.5 } });
@@ -93,22 +113,24 @@ map.on("load", () => {
     "circle-radius": 10, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#fff", "circle-stroke-width": 2, "circle-stroke-opacity": 0 } });
 
   const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12, className: "tip" });
-  map.on("mousemove", "dots", (e) => {
-    map.getCanvas().style.cursor = "pointer";
-    tip.setLngLat(e.features[0].geometry.coordinates).setText(e.features[0].properties.name).addTo(map);
-  });
-  map.on("mouseleave", "dots", () => { map.getCanvas().style.cursor = ""; tip.remove(); });
-  map.on("click", "dots", (e) => select(e.features[0].properties.id, false));
+  for (const layerId of PIN_LAYERS) {
+    map.on("mousemove", layerId, (e) => {
+      map.getCanvas().style.cursor = "pointer";
+      tip.setLngLat(e.features[0].geometry.coordinates).setText(e.features[0].properties.name).addTo(map);
+    });
+    map.on("mouseleave", layerId, () => { map.getCanvas().style.cursor = ""; tip.remove(); });
+    map.on("click", layerId, (e) => select(e.features[0].properties.id, false));
+  }
   const deptTip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 10, className: "tip" });
   map.on("mousemove", (e) => {
-    if (!(deptsOn && deptEdit && deptFeats) || map.queryRenderedFeatures(e.point, { layers: ["dots"] }).length) { deptTip.remove(); return; }
+    if (!(deptsOn && deptEdit && deptFeats) || map.queryRenderedFeatures(e.point, { layers: PIN_LAYERS }).length) { deptTip.remove(); return; }
     const d = deptOf(e.lngLat.lng, e.lngLat.lat);
     if (!d) { deptTip.remove(); return; }
     map.getCanvas().style.cursor = "pointer";
     deptTip.setLngLat(e.lngLat).setText(`${d.code} · ${d.nom}${checkedDepts().has(d.code) ? " ✓" : ""}`).addTo(map);
   });
   map.on("click", (e) => {
-    if (map.queryRenderedFeatures(e.point, { layers: ["dots"] }).length) return;
+    if (map.queryRenderedFeatures(e.point, { layers: PIN_LAYERS }).length) return;
     if (deptsOn && deptEdit && deptFeats) { toggleDeptAt(e.lngLat.lng, e.lngLat.lat); return; }
     sel = null; render();
   });
@@ -773,7 +795,10 @@ function fromFeature(f) {
   if (!pr.name || !Array.isArray(c)) return null;
   const street = [pr.street, pr.housenumber].filter(Boolean).join(" ");
   const city = pr.city || pr.town || pr.village || pr.district || pr.county || pr.state || "";
-  const cat = pr.osm_key === "amenity" ? AMENITY[pr.osm_value] || null : null;
+  let cat = null;
+  if (pr.osm_key === "amenity") cat = AMENITY[pr.osm_value] || null;
+  else if ((pr.osm_key === "landuse" && pr.osm_value === "winter_sports") || pr.osm_key === "aerialway" ||
+           pr.osm_key === "piste:type" || (pr.osm_key === "sport" && /ski/.test(pr.osm_value || ""))) cat = "ski";
   // pays, ou région/état (Angleterre, Catalogne…) : on colore le pays qui la contient
   const isCountry = pr.type === "country" || pr.type === "state" ||
     (pr.osm_key === "place" && ["country", "state", "region"].includes(pr.osm_value));
@@ -829,13 +854,14 @@ function showSug(message) {
   }
   for (const r of results) {
     const li = document.createElement("li"); li.setAttribute("role", "option");
-    const dot = document.createElement("span"); dot.className = "dot " + (r.cat || "");
+    const dot = document.createElement("span"); dot.className = "dot " + ($("#addcat").value || r.cat || "");
     const txt = document.createElement("span"); txt.className = "txt";
     const n = document.createElement("span"); n.className = "n"; n.textContent = r.name;
     const c = document.createElement("span"); c.className = "c";
     const where = [r.street, r.city, r.country].filter(Boolean).join(", ");
+    const shown = $("#addcat").value || r.cat;
     c.textContent = r.kind === "country" ? "Pays ou région · colore le pays sur la carte, sans lieu"
-      : `${r.cat ? CATS[r.cat] : "Autre lieu"} · ${where}`;
+      : `${shown ? CATS[shown] : "Autre lieu"} · ${where}`;
     txt.append(n, c); li.append(dot, txt);
     li.onmousedown = (e) => { e.preventDefault(); pick(r); };
     sug.append(li);
@@ -865,7 +891,7 @@ function pick(r) {
   if (!p) {
     p = {
       id: r.id, name: r.name, city: r.city, country: r.country, lat: r.lat, lon: r.lon,
-      cat: r.cat || "restaurant", date: "", dateSet: false, rating: 0, note: "",
+      cat: $("#addcat").value || r.cat || "restaurant", date: "", dateSet: false, rating: 0, note: "",
     };
     places.push(p); persist();
   }

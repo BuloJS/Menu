@@ -11,6 +11,7 @@ Carte du monde des restaurants, bars et boîtes où je suis allé.
 - **Nations du Royaume-Uni** : Angleterre, Écosse, Pays de Galles et Irlande du Nord sont des pays séparés (`assets/uk-nations.json`, Natural Earth subunits 50 m, domaine public).
 - **Territoires éloignés** : un pays est coloré sans ses DOM-TOM, Canaries, Açores, Hawaï, Alaska… (groupes de terres à plus de 100 km). Ils ne se colorent que si un lieu y est enregistré.
 - **Départements** : les 96 départements de la France métropolitaine (`assets/departements.json`, gregoiredavid/france-geojson, version simplifiée). Un département se colore tout seul quand un lieu y est enregistré, ou se coche à la main (liste, ou clic sur la carte avec « Cocher sur la carte »). Les cases à cocher sont enregistrées dans `user_data` (champ `depts`).
+- **Stations de ski** : quatrième catégorie, avec un pictogramme de sommet enneigé sur la carte. Le sélecteur à côté de la recherche force la catégorie du lieu ajouté (Auto = détectée dans OpenStreetMap).
 - **Fiche** : catégorie, date de visite, note sur 5, commentaire.
 - **Accès** : protégé par la session ouverte sur Home (`assets/guard.js`).
 - **Données** : table `user_data` de Home, ligne `app = "menu"`, isolée par

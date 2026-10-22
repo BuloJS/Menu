@@ -21,8 +21,17 @@
     <p class="sub">Les restaurants, bars et boîtes où je suis vraiment allé. Tapez un nom pour l'ajouter à la carte.</p>
   </div>
   <div class="search">
-    <input id="q" type="search" placeholder="Rechercher un lieu ou un pays (ex. Chez Paul Lyon, Japon)" autocomplete="off"
-           role="combobox" aria-expanded="false" aria-controls="sug" aria-label="Rechercher un lieu ou un pays">
+    <div class="searchrow">
+      <input id="q" type="search" placeholder="Rechercher un lieu ou un pays (ex. Chez Paul Lyon, Japon)" autocomplete="off"
+             role="combobox" aria-expanded="false" aria-controls="sug" aria-label="Rechercher un lieu ou un pays">
+      <select id="addcat" aria-label="Catégorie du lieu ajouté" title="Catégorie du lieu que vous allez ajouter">
+        <option value="">Auto</option>
+        <option value="restaurant">Restaurant</option>
+        <option value="bar">Bar</option>
+        <option value="boite">Boîte</option>
+        <option value="ski">⛷ Station de ski</option>
+      </select>
+    </div>
     <ul class="sug" id="sug" role="listbox" hidden></ul>
   </div>
 </header>
