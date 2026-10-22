@@ -20,6 +20,7 @@ const AMENITY = {
 };
 
 const $ = (s) => document.querySelector(s);
+const norm = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 let places = [];
@@ -583,7 +584,9 @@ function fromFeature(f) {
   const street = [pr.street, pr.housenumber].filter(Boolean).join(" ");
   const city = pr.city || pr.town || pr.village || pr.district || pr.county || pr.state || "";
   const cat = pr.osm_key === "amenity" ? AMENITY[pr.osm_value] || null : null;
-  const isCountry = pr.osm_key === "place" && pr.osm_value === "country";
+  // pays, ou région/état (Angleterre, Catalogne…) : on colore le pays qui la contient
+  const isCountry = pr.type === "country" || pr.type === "state" ||
+    (pr.osm_key === "place" && ["country", "state", "region"].includes(pr.osm_value));
   return {
     kind: isCountry ? "country" : "place",
     id: `${pr.osm_type || "X"}${pr.osm_id ?? c.join(",")}`,
@@ -598,13 +601,26 @@ async function search(text) {
     const c = map.getCenter();
     params.set("lat", c.lat.toFixed(3)); params.set("lon", c.lng.toFixed(3)); params.set("location_bias_scale", "0.4");
   }
-  try {
-    const res = await fetch(`${PHOTON}?${params}`, { signal: ctl.signal });
+  // 2e requête, limitée aux pays et régions : « Angleterre » ou « Japon » ressortent
+  // même quand des restaurants du même nom les noient dans les 10 premiers résultats.
+  const regionParams = new URLSearchParams({ q: text, limit: "3", lang: "default" });
+  regionParams.append("layer", "country"); regionParams.append("layer", "state");
+  const get = async (pr) => {
+    const res = await fetch(`${PHOTON}?${pr}`, { signal: ctl.signal });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-    results = (data.features || []).map(fromFeature).filter(Boolean);
-    // Restaurants, bars et boîtes d'abord, sans changer l'ordre de pertinence à l'intérieur
-    const rank = (r) => (r.cat ? 0 : r.kind === "country" ? 1 : 2);
+    return (await res.json()).features || [];
+  };
+  try {
+    const [main, regions] = await Promise.all([
+      get(params),
+      text.length >= 3 ? get(regionParams).catch((e) => { if (e.name === "AbortError") throw e; return []; }) : [],
+    ]);
+    const seen = new Set();
+    results = [...regions, ...main].map(fromFeature).filter(Boolean)
+      .filter((r) => !seen.has(r.id) && seen.add(r.id));
+    // Pays dont le nom correspond exactement, puis restaurants/bars/boîtes, puis pays/régions, puis le reste.
+    const t = norm(text);
+    const rank = (r) => (r.kind === "country" && norm(r.name) === t ? 0 : r.cat ? 1 : r.kind === "country" ? 2 : 3);
     results.sort((a, b) => rank(a) - rank(b));
     showSug();
   } catch (e) {
@@ -627,7 +643,7 @@ function showSug(message) {
     const n = document.createElement("span"); n.className = "n"; n.textContent = r.name;
     const c = document.createElement("span"); c.className = "c";
     const where = [r.street, r.city, r.country].filter(Boolean).join(", ");
-    c.textContent = r.kind === "country" ? "Pays · coloré sur la carte, sans lieu"
+    c.textContent = r.kind === "country" ? "Pays ou région · colore le pays sur la carte, sans lieu"
       : `${r.cat ? CATS[r.cat] : "Autre lieu"} · ${where}`;
     txt.append(n, c); li.append(dot, txt);
     li.onmousedown = (e) => { e.preventDefault(); pick(r); };
