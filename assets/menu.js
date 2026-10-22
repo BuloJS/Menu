@@ -170,6 +170,41 @@ const UK_IDS = ["826-ENG", "826-SCT", "826-WLS", "826-NIR"];
 // Relations OpenStreetMap renvoyées par la recherche → polygone
 const UK_BY_OSM = { 62149: "826", 58447: "826-ENG", 58446: "826-SCT", 58437: "826-WLS", 156393: "826-NIR" };
 
+// Un pays est découpé en « unités » : son territoire principal (avec les îles proches, Corse ou
+// Baléares par exemple) et, à part, chaque groupe d'îles ou de terres éloigné (DOM-TOM, Canaries,
+// Açores, Hawaï, Alaska…). Une unité éloignée n'est colorée que si on y a un lieu.
+const JOIN_KM = 100;
+const areaOf = (b) => (b[2] - b[0]) * (b[3] - b[1]);
+function gapKm(a, b) {
+  const dx = Math.max(0, a[0] - b[2], b[0] - a[2]), dy = Math.max(0, a[1] - b[3], b[1] - a[3]);
+  const lat = (((a[1] + a[3] + b[1] + b[3]) / 4) * Math.PI) / 180;
+  return Math.hypot(dx * Math.cos(lat), dy) * 111;
+}
+function buildUnits(feats) {
+  const units = [];
+  for (const f of feats) {
+    const polys = polysOf(f.geometry).map((c) => ({ c, box: bboxOf({ coordinates: c }) }));
+    const par = polys.map((_, i) => i);
+    const find = (i) => (par[i] === i ? i : (par[i] = find(par[i])));
+    for (let i = 0; i < polys.length; i++) for (let j = i + 1; j < polys.length; j++) {
+      if (gapKm(polys[i].box, polys[j].box) <= JOIN_KM) par[find(i)] = find(j);
+    }
+    const groups = new Map();
+    polys.forEach((pl, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(pl); });
+    const list = [...groups.values()].map((g) => {
+      const big = g.reduce((a, b) => (areaOf(a.box) >= areaOf(b.box) ? a : b));
+      const box = g.reduce((u, pl) => [Math.min(u[0], pl.box[0]), Math.min(u[1], pl.box[1]), Math.max(u[2], pl.box[2]), Math.max(u[3], pl.box[3])], [180, 90, -180, -90]);
+      return { g, big, box };
+    }).sort((a, b) => areaOf(b.big.box) - areaOf(a.big.box));
+    list.forEach((u, k) => {
+      const id = k === 0 ? String(f.id)
+        : `${f.id}@${((u.big.box[0] + u.big.box[2]) / 2).toFixed(1)},${((u.big.box[1] + u.big.box[3]) / 2).toFixed(1)}`;
+      units.push({ f: { id, properties: f.properties, geometry: { type: "MultiPolygon", coordinates: u.g.map((x) => x.c) } }, box: u.box });
+    });
+  }
+  return units;
+}
+
 function loadWorld() {
   if (worldLoading || typeof topojson === "undefined") return;
   worldLoading = Promise.all([
@@ -178,7 +213,7 @@ function loadWorld() {
   ]).then(([t, uk]) => {
     let feats = topojson.feature(t, t.objects.countries).features.filter((f) => f.geometry);
     if (uk?.features?.length) feats = feats.filter((f) => String(f.id) !== "826").concat(uk.features);
-    world = feats.map((f) => ({ f, box: bboxOf(f.geometry) }));
+    world = buildUnits(feats);
     drawCountries(); renderList();
   }).catch(() => { worldLoading = null; });   // hors ligne : pas de teinte, le reste fonctionne
 }
