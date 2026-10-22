@@ -56,6 +56,12 @@ map.on("style.load", () => {
 });
 
 map.on("load", () => {
+  // pays visités : teinte douce sous les noms du fond de carte
+  const firstSymbol = map.getStyle().layers.find((l) => l.type === "symbol")?.id;
+  map.addSource("visited", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({ id: "visited-fill", type: "fill", source: "visited", paint: { "fill-color": "#5e5ce6", "fill-opacity": 0.32 } }, firstSymbol);
+  map.addLayer({ id: "visited-line", type: "line", source: "visited", paint: { "line-color": "#9a98ff", "line-opacity": 0.75, "line-width": 1.2 } }, firstSymbol);
+  loadWorld();
   map.addSource("places", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addSource("trips", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   // halo lumineux, point, anneau de sélection, anneau qui pulse
@@ -91,6 +97,80 @@ map.on("load", () => {
   render();
   fitAll();
 });
+
+// ---- pays visités : on retrouve le pays de chaque lieu à partir de ses coordonnées
+const WORLD_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json";
+let world = null, worldLoading = null, visitedKey = "";
+const countryCache = new Map();
+let countriesOn = true;
+try { countriesOn = localStorage.getItem("menu:countries") !== "0"; } catch {}
+
+function bboxOf(geom) {
+  let x0 = 180, y0 = 90, x1 = -180, y1 = -90;
+  const walk = (a) => typeof a[0] === "number"
+    ? (x0 = Math.min(x0, a[0]), x1 = Math.max(x1, a[0]), y0 = Math.min(y0, a[1]), y1 = Math.max(y1, a[1]))
+    : a.forEach(walk);
+  walk(geom.coordinates);
+  return [x0, y0, x1, y1];
+}
+function inRing(x, y, ring) {
+  let c = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+const inPoly = (x, y, poly) => inRing(x, y, poly[0]) && !poly.slice(1).some((h) => inRing(x, y, h));
+const polysOf = (g) => (g.type === "Polygon" ? [g.coordinates] : g.coordinates);
+function nearKm(x, y, g) {
+  let best = Infinity;
+  const k = Math.cos((y * Math.PI) / 180);
+  for (const poly of polysOf(g)) for (const [px, py] of poly[0]) {
+    const d = Math.hypot((px - x) * k, py - y) * 111;
+    if (d < best) best = d;
+  }
+  return best;
+}
+function countryOf(p) {
+  const key = p.lon + "," + p.lat;
+  if (countryCache.has(key)) return countryCache.get(key);
+  let hit = null;
+  for (const c of world) {
+    const [x0, y0, x1, y1] = c.box;
+    if (p.lon < x0 || p.lon > x1 || p.lat < y0 || p.lat > y1) continue;
+    if (polysOf(c.f.geometry).some((poly) => inPoly(p.lon, p.lat, poly))) { hit = c.f; break; }
+  }
+  if (!hit) {   // point côtier tombé en mer à cette échelle : pays le plus proche à moins de 60 km
+    let best = 60;
+    for (const c of world) {
+      if (p.lon < c.box[0] - 1 || p.lon > c.box[2] + 1 || p.lat < c.box[1] - 1 || p.lat > c.box[3] + 1) continue;
+      const d = nearKm(p.lon, p.lat, c.f.geometry);
+      if (d < best) { best = d; hit = c.f; }
+    }
+  }
+  countryCache.set(key, hit);
+  return hit;
+}
+function loadWorld() {
+  if (worldLoading || typeof topojson === "undefined") return;
+  worldLoading = fetch(WORLD_URL).then((r) => r.json()).then((t) => {
+    world = topojson.feature(t, t.objects.countries).features
+      .filter((f) => f.geometry).map((f) => ({ f, box: bboxOf(f.geometry) }));
+    drawCountries();
+  }).catch(() => { worldLoading = null; });   // hors ligne : pas de teinte, le reste fonctionne
+}
+function drawCountries() {
+  if (!ready || !world) return;
+  const seen = new Map();
+  for (const p of places) { const f = countryOf(p); if (f) seen.set(f.id, f); }
+  map.setLayoutProperty("visited-fill", "visibility", countriesOn ? "visible" : "none");
+  map.setLayoutProperty("visited-line", "visibility", countriesOn ? "visible" : "none");
+  const key = [...seen.keys()].sort().join(",");
+  if (key === visitedKey) return;
+  visitedKey = key;
+  map.getSource("visited").setData({ type: "FeatureCollection", features: [...seen.values()] });
+}
 
 // ---- trips : des lieux visités à des jours consécutifs sont reliés dans l'ordre
 const DAY = 864e5;
@@ -152,6 +232,7 @@ const tripOf = (p) => computeTrips(visiblePlaces()).find((t) => t.places.include
 
 function drawMarkers() {
   if (!ready) return;
+  drawCountries();
   map.getSource("trips").setData({
     type: "FeatureCollection",
     features: !tripsOn ? [] : computeTrips(visiblePlaces()).map((t) => ({
@@ -201,6 +282,17 @@ function frame(t) {
 }
 requestAnimationFrame(frame);
 
+const countryBtn = $("#countries");
+const syncCountryBtn = () => {
+  countryBtn.textContent = countriesOn ? "Pays : oui" : "Pays : non";
+  countryBtn.setAttribute("aria-pressed", String(countriesOn));
+};
+countryBtn.onclick = () => {
+  countriesOn = !countriesOn;
+  try { localStorage.setItem("menu:countries", countriesOn ? "1" : "0"); } catch {}
+  syncCountryBtn(); drawCountries();
+};
+syncCountryBtn();
 const tripBtn = $("#trips");
 const syncTripBtn = () => {
   tripBtn.textContent = tripsOn ? "Trips : oui" : "Trips : non";
